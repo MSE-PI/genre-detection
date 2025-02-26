@@ -57,7 +57,7 @@ class MyService(Service):
             status=ServiceStatus.AVAILABLE,
             data_in_fields=[
                 FieldDescription(
-                    name="audio",
+                    name="audio_file",
                     type=[
                         FieldDescriptionType.AUDIO_OGG,
                         FieldDescriptionType.AUDIO_MP3,
@@ -87,7 +87,7 @@ class MyService(Service):
         self._model = load_model()
 
     def process(self, data):
-        raw = data["audio"].data
+        raw = data["audio_file"].data
 
         result = self._model(raw)
 
@@ -219,7 +219,7 @@ async def handle_process(audio: UploadFile = File(...)):
     # convert audio to bytes
     audio_bytes = await audio.read()
     # call service to process audio
-    result = MyService().process({"audio": TaskData(data=audio_bytes, type=AUDIO_TYPE)})
+    result = MyService().process({"audio_file": TaskData(data=audio_bytes, type=AUDIO_TYPE)})
     # Return the result
     data = json.loads(result["result"].data)
     return data
