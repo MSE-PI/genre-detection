@@ -19,15 +19,28 @@ from common_code.common.models import FieldDescription, ExecutionUnitTag
 from contextlib import asynccontextmanager
 
 # Imports required by the service's model
-# TODO: 1. ADD REQUIRED IMPORTS (ALSO IN THE REQUIREMENTS.TXT)
+from transformers import pipeline
+from fastapi import File, UploadFile, HTTPException
+import torch
+import json
 
 settings = get_settings()
 
 
+def load_model():
+    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    pipe = pipeline(
+        model="dima806/music_genres_classification",
+        device=device,
+        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+        task="audio-classification"
+    )
+    return pipe
+
+
 class MyService(Service):
-    # TODO: 2. CHANGE THIS DESCRIPTION
     """
-    My service model
+    Genre detection service model
     """
 
     # Any additional fields must be excluded for Pydantic to work
@@ -36,20 +49,18 @@ class MyService(Service):
 
     def __init__(self):
         super().__init__(
-            # TODO: 3. CHANGE THE SERVICE NAME AND SLUG
-            name="My Service",
-            slug="my-service",
+            name="Genre Detection",
+            slug="genre-detection",
             url=settings.service_url,
             summary=api_summary,
             description=api_description,
             status=ServiceStatus.AVAILABLE,
-            # TODO: 4. CHANGE THE INPUT AND OUTPUT FIELDS, THE TAGS AND THE HAS_AI VARIABLE
             data_in_fields=[
                 FieldDescription(
-                    name="image",
+                    name="audio",
                     type=[
-                        FieldDescriptionType.IMAGE_PNG,
-                        FieldDescriptionType.IMAGE_JPEG,
+                        FieldDescriptionType.AUDIO_OGG,
+                        FieldDescriptionType.AUDIO_MP3,
                     ],
                 ),
             ],
@@ -60,28 +71,36 @@ class MyService(Service):
             ],
             tags=[
                 ExecutionUnitTag(
-                    name=ExecutionUnitTagName.IMAGE_PROCESSING,
-                    acronym=ExecutionUnitTagAcronym.IMAGE_PROCESSING,
+                    name=ExecutionUnitTagName.AUDIO_PROCESSING,
+                    acronym=ExecutionUnitTagAcronym.AUDIO_PROCESSING,
+                ),
+                ExecutionUnitTag(
+                    name=ExecutionUnitTagName.NATURAL_LANGUAGE_PROCESSING,
+                    acronym=ExecutionUnitTagAcronym.NATURAL_LANGUAGE_PROCESSING,
                 ),
             ],
-            has_ai=False,
+            has_ai=True,
             # OPTIONAL: CHANGE THE DOCS URL TO YOUR SERVICE'S DOCS
             docs_url="https://docs.swiss-ai-center.ch/reference/core-concepts/service/",
         )
         self._logger = get_logger(settings)
+        self._model = load_model()
 
-    # TODO: 5. CHANGE THE PROCESS METHOD (CORE OF THE SERVICE)
     def process(self, data):
-        # NOTE that the data is a dictionary with the keys being the field names set in the data_in_fields
-        # The objects in the data variable are always bytes. It is necessary to convert them to the desired type
-        # before using them.
-        # raw = data["image"].data
-        # input_type = data["image"].type
-        # ... do something with the raw data
+        raw = data["audio"].data
+
+        result = self._model(raw)
+
+        print(result)
+
+        json_res = {
+            "genre_top": result[0]["label"],
+            "genres": result,
+        }
 
         # NOTE that the result must be a dictionary with the keys being the field names set in the data_out_fields
         return {
-            "result": TaskData(data=..., type=FieldDescriptionType.APPLICATION_JSON)
+            "result": TaskData(data=json.dumps(json_res).encode("UTF-8"), type=FieldDescriptionType.APPLICATION_JSON)
         }
 
 
@@ -135,19 +154,16 @@ async def lifespan(app: FastAPI):
         await service_service.graceful_shutdown(my_service, engine_url)
 
 
-# TODO: 6. CHANGE THE API DESCRIPTION AND SUMMARY
-api_description = """My service
-bla bla bla...
+api_description = """This service detects the genre of an audio file
+using the Dima806/music_genres_classification model.
 """
-api_summary = """My service
-bla bla bla...
+api_summary = """Detect the genre of an audio file.
 """
 
 # Define the FastAPI application with information
-# TODO: 7. CHANGE THE API TITLE, VERSION, CONTACT AND LICENSE
 app = FastAPI(
     lifespan=lifespan,
-    title="Sample Service API.",
+    title="Genre Detection API.",
     description=api_description,
     version="0.0.1",
     contact={
@@ -182,3 +198,28 @@ app.add_middleware(
 @app.get("/", include_in_schema=False)
 async def root():
     return RedirectResponse("/docs", status_code=301)
+
+
+@app.post('/process', tags=['Process'])
+async def handle_process(audio: UploadFile = File(...)):
+    """
+    Route to perform the musical genre detection on an audio file.
+    """
+    # Check if audio file is given
+    if audio is None:
+        raise HTTPException(status_code=400, detail="No audio file given")
+    # Check if audio file is valid
+    if audio.content_type not in ["audio/mpeg", "audio/ogg"]:
+        raise HTTPException(status_code=400, detail="Invalid audio file type")
+    # Get audio file type
+    if audio.content_type == "audio/mpeg":
+        AUDIO_TYPE = FieldDescriptionType.AUDIO_MP3
+    else:
+        AUDIO_TYPE = FieldDescriptionType.AUDIO_OGG
+    # convert audio to bytes
+    audio_bytes = await audio.read()
+    # call service to process audio
+    result = MyService().process({"audio": TaskData(data=audio_bytes, type=AUDIO_TYPE)})
+    # Return the result
+    data = json.loads(result["result"].data)
+    return data

@@ -1,1 +1,4 @@
 common-code[test] @ git+https://github.com/swiss-ai-center/common-code.git@main
+python-multipart==0.0.20
+torch==2.6.0
+transformers==4.49.0

@@ -1,5 +1,5 @@
 [project]
-name = "service" # Edit this and remove comment
+name = "genre-detection"
 
 [tool.pytest.ini_options]
 pythonpath = [".", "src"]
